@@ -15,12 +15,20 @@ namespace mitaywalle
 			RepeatByDistance
 		}
 
+		public enum WidthCurveMode
+		{
+			AlongTrail,
+			ByTime
+		}
+
 		[SerializeField] private int maxSegments = 250;
 		[SerializeField] private Texture trailTexture;
 
 		public Transform Target;
 		public float MinDistance = 0.05f;
 		public float Width = 10f;
+		public WidthCurveMode WidthMode = WidthCurveMode.AlongTrail;
+		public AnimationCurve WidthCurve = AnimationCurve.Linear(0f, 1f, 1f, 1f);
 		public float TrailLifetime = 1.5f;
 		public Gradient LifetimeGradient = CreateLifetimeGradient();
 		public Gradient TrailGradient = CreateTrailGradient();
@@ -56,6 +64,8 @@ namespace mitaywalle
 		{
 			base.OnEnable();
 			hasLastPoint = false;
+			if (WidthCurve == null)
+				WidthCurve = AnimationCurve.Linear(0f, 1f, 1f, 1f);
 			EnsureGradients();
 		}
 
@@ -82,6 +92,9 @@ namespace mitaywalle
 
 			if (TrailLifetime < 0f)
 				TrailLifetime = 0f;
+
+			if (WidthCurve == null)
+				WidthCurve = AnimationCurve.Linear(0f, 1f, 1f, 1f);
 
 			EnsureGradients();
 			SetMaterialDirty();
@@ -174,7 +187,6 @@ namespace mitaywalle
 				return;
 
 			float now = Time.unscaledTime;
-			float halfWidth = Width * 0.5f;
 			int count = points.Count;
 			Vector2[] localPoints = new Vector2[count];
 			float totalDistance = distances[count - 1] > 0f ? distances[count - 1] : 1f;
@@ -188,6 +200,8 @@ namespace mitaywalle
 				Vector2 p = localPoints[i];
 				float trailT = count > 1 ? (float)i / (count - 1) : 0f;
 				float age01 = TrailLifetime > 0f ? Mathf.Clamp01((now - times[i]) / TrailLifetime) : 1f;
+				float widthT = WidthMode == WidthCurveMode.ByTime ? age01 : trailT;
+				float halfWidth = Width * Mathf.Max(0f, WidthCurve.Evaluate(widthT)) * 0.5f;
 				Color gradientColor = TrailGradient.Evaluate(trailT) * LifetimeGradient.Evaluate(age01);
 				Color32 c = MultiplyColor(color, gradientColor);
 				float u = GetU(i, totalDistance);
