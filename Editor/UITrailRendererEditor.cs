@@ -1,3 +1,7 @@
+using UnityEditor;
+
+namespace mitaywalle
+{
 	[CustomEditor(typeof(UITrailRenderer))]
 	[CanEditMultipleObjects]
 	public class UITrailRendererEditor : Editor
@@ -9,3 +13,4 @@
 			serializedObject.ApplyModifiedProperties();
 		}
 	}
+}
