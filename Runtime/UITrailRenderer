@@ -1,0 +1,185 @@
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace mitaywalle
+{
+	[ExecuteAlways]
+	[RequireComponent(typeof(CanvasRenderer))]
+	public class UITrailRenderer : MaskableGraphic
+	{
+		[SerializeField] private int maxSegments = 250;
+
+		public Transform Target;
+		public float MinDistance = 2f;
+		public float Width = 10f;
+		public float TrailLifetime = 1.5f;
+		public bool FadeTrail = true;
+		public AnimationCurve FadeCurve = AnimationCurve.EaseInOut(0f, 1f, 1f, 0f);
+		public Vector3 WorldOffset;
+		public Vector3 LocalOffset;
+
+		private readonly List<Vector2> points = new();
+		private readonly List<float> times = new();
+		private Vector2 lastPoint;
+		private bool hasLastPoint;
+
+		protected override void OnEnable()
+		{
+			base.OnEnable();
+			hasLastPoint = false;
+		}
+
+		protected override void OnDisable()
+		{
+			base.OnDisable();
+			points.Clear();
+			times.Clear();
+			hasLastPoint = false;
+			SetVerticesDirty();
+		}
+
+		private void OnValidate()
+		{
+			if (maxSegments < 1)
+				maxSegments = 1;
+
+			if (MinDistance < 0f)
+				MinDistance = 0f;
+
+			if (Width < 0f)
+				Width = 0f;
+
+			if (TrailLifetime < 0f)
+				TrailLifetime = 0f;
+
+			SetVerticesDirty();
+		}
+
+		private void LateUpdate()
+		{
+			Transform target = Target != null ? Target : transform;
+			Vector3 worldPosition = target.TransformPoint(LocalOffset) + WorldOffset;
+			Vector2 localPoint = rectTransform.InverseTransformPoint(worldPosition);
+
+			if (!hasLastPoint)
+			{
+				AddPoint(localPoint);
+			}
+			else if ((localPoint - lastPoint).sqrMagnitude >= MinDistance * MinDistance)
+			{
+				AddPoint(localPoint);
+			}
+
+			RemoveOldPoints();
+			SetVerticesDirty();
+		}
+
+		private void AddPoint(Vector2 point)
+		{
+			if (points.Count >= maxSegments + 1)
+			{
+				points.RemoveAt(0);
+				times.RemoveAt(0);
+			}
+
+			points.Add(point);
+			times.Add(Time.unscaledTime);
+			lastPoint = point;
+			hasLastPoint = true;
+		}
+
+		private void RemoveOldPoints()
+		{
+			if (TrailLifetime <= 0f)
+			{
+				points.Clear();
+				times.Clear();
+				hasLastPoint = false;
+				return;
+			}
+
+			float now = Time.unscaledTime;
+			int removeCount = 0;
+			for (int i = 0; i < times.Count; i++)
+			{
+				if (now - times[i] > TrailLifetime)
+					removeCount++;
+				else
+					break;
+			}
+
+			if (removeCount <= 0)
+				return;
+
+			points.RemoveRange(0, removeCount);
+			times.RemoveRange(0, removeCount);
+
+			if (points.Count == 0)
+				hasLastPoint = false;
+		}
+
+		protected override void OnPopulateMesh(VertexHelper vh)
+		{
+			vh.Clear();
+
+			if (points.Count < 2 || Width <= 0f)
+				return;
+
+			float now = Time.unscaledTime;
+			float halfWidth = Width * 0.5f;
+			int count = points.Count;
+
+			for (int i = 0; i < count; i++)
+			{
+				Vector2 normal = GetPointNormal(i);
+				Vector2 p = points[i];
+				Color32 c = color;
+
+				if (FadeTrail)
+				{
+					float age01 = TrailLifetime > 0f ? Mathf.Clamp01((now - times[i]) / TrailLifetime) : 1f;
+					float fade = Mathf.Clamp01(FadeCurve.Evaluate(age01));
+					c.a = (byte)Mathf.RoundToInt(c.a * fade);
+				}
+
+				UIVertex left = UIVertex.simpleVert;
+				left.color = c;
+				left.position = p - normal * halfWidth;
+				left.uv0 = new Vector2((float)i / (count - 1), 0f);
+
+				UIVertex right = UIVertex.simpleVert;
+				right.color = c;
+				right.position = p + normal * halfWidth;
+				right.uv0 = new Vector2((float)i / (count - 1), 1f);
+
+				vh.AddVert(left);
+				vh.AddVert(right);
+			}
+
+			for (int i = 0; i < count - 1; i++)
+			{
+				int vi = i * 2;
+				vh.AddTriangle(vi, vi + 1, vi + 2);
+				vh.AddTriangle(vi + 1, vi + 3, vi + 2);
+			}
+		}
+
+		private Vector2 GetPointNormal(int index)
+		{
+			Vector2 dir;
+			if (index == 0)
+				dir = points[1] - points[0];
+			else if (index == points.Count - 1)
+				dir = points[index] - points[index - 1];
+			else
+				dir = (points[index + 1] - points[index - 1]) * 0.5f;
+
+			if (dir.sqrMagnitude <= Mathf.Epsilon)
+				return Vector2.up;
+
+			dir.Normalize();
+			return new Vector2(-dir.y, dir.x);
+		}
+	}
+}
