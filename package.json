@@ -1,0 +1,16 @@
+{
+  "name": "com.mitay-walle.ui-trail-renderer",
+  "displayName": "UI Trail Renderer",
+  "version": "1.0.0",
+   "unity": "2018.4",
+    "keywords": [
+    "UI",
+    "VFX",
+	"Trail",
+	"Visual Special Effects",
+	"Graphics",
+	"Renderers"
+  ],
+  "description": "Draw trails in Unity UI (uGUI)",
+  "author": "mitay-walle <mitay-walle91@mail.ru> (https://github.com/mitay-walle)"
+}
