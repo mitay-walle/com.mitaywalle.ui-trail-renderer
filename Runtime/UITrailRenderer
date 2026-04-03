@@ -8,6 +8,13 @@ namespace mitaywalle
 	[RequireComponent(typeof(CanvasRenderer))]
 	public class UITrailRenderer : MaskableGraphic
 	{
+		public enum TrailUVMode
+		{
+			Stretch,
+			RepeatBySegment,
+			RepeatByDistance
+		}
+
 		[SerializeField] private int maxSegments = 250;
 		[SerializeField] private Texture trailTexture;
 
@@ -15,13 +22,17 @@ namespace mitaywalle
 		public float MinDistance = 0.05f;
 		public float Width = 10f;
 		public float TrailLifetime = 1.5f;
-		public bool FadeTrail = true;
-		public AnimationCurve FadeCurve = AnimationCurve.EaseInOut(0f, 1f, 1f, 0f);
+		public Gradient LifetimeGradient = CreateLifetimeGradient();
+		public Gradient TrailGradient = CreateTrailGradient();
+		public TrailUVMode UVMode = TrailUVMode.Stretch;
+		public Vector2 UVTiling = Vector2.one;
+		public Vector2 UVOffset = Vector2.zero;
 		public Vector3 WorldOffset;
 		public Vector3 LocalOffset;
 
 		private readonly List<Vector3> points = new();
 		private readonly List<float> times = new();
+		private readonly List<float> distances = new();
 		private Vector3 lastPoint;
 		private bool hasLastPoint;
 
@@ -45,6 +56,7 @@ namespace mitaywalle
 		{
 			base.OnEnable();
 			hasLastPoint = false;
+			EnsureGradients();
 		}
 
 		protected override void OnDisable()
@@ -52,6 +64,7 @@ namespace mitaywalle
 			base.OnDisable();
 			points.Clear();
 			times.Clear();
+			distances.Clear();
 			hasLastPoint = false;
 			SetVerticesDirty();
 		}
@@ -70,6 +83,7 @@ namespace mitaywalle
 			if (TrailLifetime < 0f)
 				TrailLifetime = 0f;
 
+			EnsureGradients();
 			SetMaterialDirty();
 			SetVerticesDirty();
 		}
@@ -99,10 +113,16 @@ namespace mitaywalle
 			{
 				points.RemoveAt(0);
 				times.RemoveAt(0);
+				distances.RemoveAt(0);
 			}
+
+			float distance = 0f;
+			if (points.Count > 0)
+				distance = distances[points.Count - 1] + Vector3.Distance(points[points.Count - 1], point);
 
 			points.Add(point);
 			times.Add(Time.unscaledTime);
+			distances.Add(distance);
 			lastPoint = point;
 			hasLastPoint = true;
 		}
@@ -113,6 +133,7 @@ namespace mitaywalle
 			{
 				points.Clear();
 				times.Clear();
+				distances.Clear();
 				hasLastPoint = false;
 				return;
 			}
@@ -132,6 +153,14 @@ namespace mitaywalle
 
 			points.RemoveRange(0, removeCount);
 			times.RemoveRange(0, removeCount);
+			distances.RemoveRange(0, removeCount);
+
+			if (distances.Count > 0)
+			{
+				float offset = distances[0];
+				for (int i = 0; i < distances.Count; i++)
+					distances[i] -= offset;
+			}
 
 			if (points.Count == 0)
 				hasLastPoint = false;
@@ -148,6 +177,7 @@ namespace mitaywalle
 			float halfWidth = Width * 0.5f;
 			int count = points.Count;
 			Vector2[] localPoints = new Vector2[count];
+			float totalDistance = distances[count - 1] > 0f ? distances[count - 1] : 1f;
 
 			for (int i = 0; i < count; i++)
 				localPoints[i] = rectTransform.InverseTransformPoint(points[i]);
@@ -156,24 +186,23 @@ namespace mitaywalle
 			{
 				Vector2 normal = GetPointNormal(localPoints, i);
 				Vector2 p = localPoints[i];
-				Color32 c = color;
-
-				if (FadeTrail)
-				{
-					float age01 = TrailLifetime > 0f ? Mathf.Clamp01((now - times[i]) / TrailLifetime) : 1f;
-					float fade = Mathf.Clamp01(FadeCurve.Evaluate(age01));
-					c.a = (byte)Mathf.RoundToInt(c.a * fade);
-				}
+				float trailT = count > 1 ? (float)i / (count - 1) : 0f;
+				float age01 = TrailLifetime > 0f ? Mathf.Clamp01((now - times[i]) / TrailLifetime) : 1f;
+				Color gradientColor = TrailGradient.Evaluate(trailT) * LifetimeGradient.Evaluate(age01);
+				Color32 c = MultiplyColor(color, gradientColor);
+				float u = GetU(i, totalDistance);
+				float v0 = UVOffset.y;
+				float v1 = UVTiling.y + UVOffset.y;
 
 				UIVertex left = UIVertex.simpleVert;
 				left.color = c;
 				left.position = p - normal * halfWidth;
-				left.uv0 = new Vector2((float)i / (count - 1), 0f);
+				left.uv0 = new Vector2(u, v0);
 
 				UIVertex right = UIVertex.simpleVert;
 				right.color = c;
 				right.position = p + normal * halfWidth;
-				right.uv0 = new Vector2((float)i / (count - 1), 1f);
+				right.uv0 = new Vector2(u, v1);
 
 				vh.AddVert(left);
 				vh.AddVert(right);
@@ -185,6 +214,73 @@ namespace mitaywalle
 				vh.AddTriangle(vi, vi + 1, vi + 2);
 				vh.AddTriangle(vi + 1, vi + 3, vi + 2);
 			}
+		}
+
+		private float GetU(int index, float totalDistance)
+		{
+			float baseU = UVMode switch
+			{
+				TrailUVMode.Stretch => points.Count > 1 ? (float)index / (points.Count - 1) : 0f,
+				TrailUVMode.RepeatBySegment => index,
+				TrailUVMode.RepeatByDistance => distances[index] / totalDistance,
+				_ => 0f
+			};
+
+			return baseU * UVTiling.x + UVOffset.x;
+		}
+
+		private static Color32 MultiplyColor(Color32 a, Color b)
+		{
+			float r = a.r / 255f * b.r;
+			float g = a.g / 255f * b.g;
+			float bl = a.b / 255f * b.b;
+			float al = a.a / 255f * b.a;
+			return new Color(r, g, bl, al);
+		}
+
+		private static Gradient CreateLifetimeGradient()
+		{
+			var gradient = new Gradient();
+			gradient.SetKeys(
+				new[]
+				{
+					new GradientColorKey(Color.white, 0f),
+					new GradientColorKey(Color.white, 1f)
+				},
+				new[]
+				{
+					new GradientAlphaKey(1f, 0f),
+					new GradientAlphaKey(0f, 1f)
+				}
+			);
+			return gradient;
+		}
+
+		private static Gradient CreateTrailGradient()
+		{
+			var gradient = new Gradient();
+			gradient.SetKeys(
+				new[]
+				{
+					new GradientColorKey(Color.white, 0f),
+					new GradientColorKey(Color.white, 1f)
+				},
+				new[]
+				{
+					new GradientAlphaKey(1f, 0f),
+					new GradientAlphaKey(1f, 1f)
+				}
+			);
+			return gradient;
+		}
+
+		private void EnsureGradients()
+		{
+			if (LifetimeGradient == null)
+				LifetimeGradient = CreateLifetimeGradient();
+
+			if (TrailGradient == null)
+				TrailGradient = CreateTrailGradient();
 		}
 
 		private Vector2 GetPointNormal(IReadOnlyList<Vector2> localPoints, int index)
